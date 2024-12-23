@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contact System</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        table, th, td {
+            border: 1px solid #ddd;
+        }
+        th, td {
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f4f4f4;
+        }
+        form {
+            margin-bottom: 20px;
+        }
+        label {
+            display: inline-block;
+            width: 80px;
+        }
+        input {
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Contact System</h1>
+
+    <h2>Add Contact</h2>
+    <form id="add-contact-form">
+        <label for="name">Name:</label>
+        <input type="text" id="name" required><br>
+        <label for="email">Email:</label>
+        <input type="email" id="email" name="email" pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$" required placeholder="example@domain.com"><br>
+        <button type="submit">Add Contact</button>
+    </form>
+
+    <h2>Contacts</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="contacts-table">
+            <!-- Contacts will be populated here -->
+        </tbody>
+    </table>
+
+    <h2>Update Contact</h2>
+    <form id="update-contact-form">
+        <label for="update-id">ID:</label>
+        <input type="number" min="0" id="update-id" required><br>
+        <label for="update-name">Name:</label>
+        <input type="text" id="update-name" required><br>
+        <label for="update-email">Email:</label>
+        <input type="email" id="update-email" name="email" pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$" required placeholder="example@domain.com">
+<br>
+        <button type="submit">Update Contact</button>
+    </form>
+
+    <script>
+        const apiUrl = 'http://localhost:8080/contacts';
+
+        // Fetch and display contacts
+        async function fetchContacts() {
+    const response = await fetch(apiUrl);
+    const contacts = await response.json();
+
+    const table = document.getElementById('contacts-table');
+    table.innerHTML = '';
+
+    // Проверка на наличие данных
+    if (!contacts || contacts.length === 0) {
+        console.log("No contacts found");
+        return;
+    }
+
+    // Заполняем таблицу контактами
+    contacts.forEach(contact => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${contact.id}</td>
+            <td>${contact.name}</td>
+            <td>${contact.email}</td>
+            <td>
+                <button onclick="deleteContact(${contact.id})">Delete</button>
+            </td>
+        `;
+        table.appendChild(row);
+    });
+}
+
+
+        // Add new contact
+        document.getElementById('add-contact-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const name = document.getElementById('name').value;
+            const email = document.getElementById('email').value;
+
+            await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, email })
+            });
+
+            e.target.reset();
+            fetchContacts();
+        });
+
+        // Update contact
+        // Update contact
+            document.getElementById('update-contact-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const id = document.getElementById('update-id').value;
+                const name = document.getElementById('update-name').value;
+                const email = document.getElementById('update-email').value;
+
+                // Отправка PUT-запроса с ID контакта в теле
+                await fetch(`${apiUrl}/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: parseInt(id), name, email })
+                });
+
+                e.target.reset();
+                fetchContacts();
+            });
+
+
+        // Delete contact
+        async function deleteContact(id) {
+            await fetch(`${apiUrl}?id=${id}`, { method: 'DELETE' });
+            fetchContacts();
+        }
+
+        // Initial fetch
+        fetchContacts();
+    </script>
+</body>
+</html>
