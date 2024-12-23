@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -121,10 +122,17 @@ func updateContactHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Извлекаем ID из URL
+	// Извлекаем ID контакта из URL
 	id := r.URL.Path[len("/contacts/"):]
 	if id == "" {
 		http.Error(w, "Missing contact ID", http.StatusBadRequest)
+		return
+	}
+
+	// Парсим ID в целочисленное значение
+	contactID, err := strconv.Atoi(id)
+	if err != nil {
+		http.Error(w, "Invalid contact ID", http.StatusBadRequest)
 		return
 	}
 
@@ -136,7 +144,7 @@ func updateContactHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Проверяем, существует ли запись с данным ID
 	var exists bool
-	err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM contacts WHERE id = $1)`, contact.ID).Scan(&exists)
+	err = db.QueryRow(`SELECT EXISTS (SELECT 1 FROM contacts WHERE id = $1)`, contactID).Scan(&exists)
 	if err != nil {
 		http.Error(w, "Failed to check contact existence", http.StatusInternalServerError)
 		log.Println("Error checking contact existence:", err)
@@ -149,7 +157,7 @@ func updateContactHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Обновляем запись
 	query := `UPDATE contacts SET name = $1, email = $2, updated_at = NOW() WHERE id = $3`
-	_, err = db.Exec(query, contact.Name, contact.Email, contact.ID)
+	_, err = db.Exec(query, contact.Name, contact.Email, contactID)
 	if err != nil {
 		http.Error(w, "Failed to update contact", http.StatusInternalServerError)
 		log.Println("Error updating contact:", err)
@@ -196,6 +204,8 @@ func main() {
 	defer db.Close()
 
 	mux := http.NewServeMux()
+
+	// Обрабатываем общий маршрут для списка контактов и добавления новых
 	mux.HandleFunc("/contacts", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -210,6 +220,9 @@ func main() {
 			http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		}
 	})
+
+	// Обрабатываем запросы для обновления и удаления контакта с использованием ID в URL
+	mux.HandleFunc("/contacts/", updateContactHandler) // Этот маршрут обрабатывает /contacts/{id}
 
 	fmt.Println("Server running on port 8080")
 	log.Fatal(http.ListenAndServe(":8080", enableCORS(mux)))

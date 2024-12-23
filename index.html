@@ -63,17 +63,17 @@
         </tbody>
     </table>
 
-    <h2>Update Contact</h2>
+        <h2>Update Contact</h2>
     <form id="update-contact-form">
         <label for="update-id">ID:</label>
         <input type="number" min="0" id="update-id" required><br>
         <label for="update-name">Name:</label>
         <input type="text" id="update-name" required><br>
         <label for="update-email">Email:</label>
-        <input type="email" id="update-email" name="email" pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$" required placeholder="example@domain.com">
-<br>
+        <input type="email" id="update-email" name="email" pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$" required placeholder="example@domain.com"><br>
         <button type="submit">Update Contact</button>
     </form>
+
 
     <script>
         const apiUrl = 'http://localhost:8080/contacts';
@@ -125,24 +125,22 @@
         });
 
         // Update contact
-        // Update contact
             document.getElementById('update-contact-form').addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const id = document.getElementById('update-id').value;
-                const name = document.getElementById('update-name').value;
-                const email = document.getElementById('update-email').value;
+            e.preventDefault();
+            const id = document.getElementById('update-id').value;
+            const name = document.getElementById('update-name').value;
+            const email = document.getElementById('update-email').value;
 
-                // Отправка PUT-запроса с ID контакта в теле
-                await fetch(`${apiUrl}/${id}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: parseInt(id), name, email })
-                });
-
-                e.target.reset();
-                fetchContacts();
+            // Убедитесь, что URL правильный
+            await fetch(`http://localhost:8080/contacts/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, email })
             });
 
+            e.target.reset();
+            fetchContacts();
+        });
 
         // Delete contact
         async function deleteContact(id) {
