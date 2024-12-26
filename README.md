@@ -14,7 +14,8 @@ The Contacts System is a web-based application designed to manage personal or bu
 - Serik Nurtas
 
 ## Screenshot
-![Screenshot of Main Page](screenshot.png)
+![Screenshot of Main Page](https://github.com/user-attachments/assets/18ac8c20-4e7c-45d3-bf30-1cb8ebaa7dd4)
+
 
 ## Getting Started
 Follow the steps below to set up and run the Contacts System project:
