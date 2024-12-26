@@ -13,6 +13,37 @@ import (
 	_ "gorm.io/gorm"
 )
 
+func getContactByIDHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Path[len("/contacts/"):]
+
+	// Проверка, передан ли ID
+	if id == "" {
+		http.Error(w, "Missing contact ID", http.StatusBadRequest)
+		return
+	}
+
+	contactID, err := strconv.Atoi(id)
+	if err != nil {
+		http.Error(w, "Invalid contact ID", http.StatusBadRequest)
+		return
+	}
+
+	var contact Contact
+	err = db.QueryRow(`SELECT id, name, email, created_at, updated_at FROM contacts WHERE id = $1`, contactID).
+		Scan(&contact.ID, &contact.Name, &contact.Email, &contact.CreatedAt, &contact.UpdatedAt)
+	if err == sql.ErrNoRows {
+		http.Error(w, "Contact not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		http.Error(w, "Failed to fetch contact", http.StatusInternalServerError)
+		log.Println("Error fetching contact:", err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(contact)
+}
+
 func enableCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -205,15 +236,13 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// Обрабатываем общий маршрут для списка контактов и добавления новых
+	// Main route for contacts
 	mux.HandleFunc("/contacts", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			getContactsHandler(w, r)
 		case http.MethodPost:
 			createContactHandler(w, r)
-		case http.MethodPut:
-			updateContactHandler(w, r)
 		case http.MethodDelete:
 			deleteContactHandler(w, r)
 		default:
@@ -221,8 +250,17 @@ func main() {
 		}
 	})
 
-	// Обрабатываем запросы для обновления и удаления контакта с использованием ID в URL
-	mux.HandleFunc("/contacts/", updateContactHandler) // Этот маршрут обрабатывает /contacts/{id}
+	// Route for specific contact (search/update)
+	mux.HandleFunc("/contacts/", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			getContactByIDHandler(w, r)
+		case http.MethodPut:
+			updateContactHandler(w, r)
+		default:
+			http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		}
+	})
 
 	fmt.Println("Server running on port 8080")
 	log.Fatal(http.ListenAndServe(":8080", enableCORS(mux)))

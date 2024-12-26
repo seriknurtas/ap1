@@ -39,15 +39,26 @@
 <body>
     <h1>Contact System</h1>
 
+    <!-- Add Contact -->
     <h2>Add Contact</h2>
     <form id="add-contact-form">
         <label for="name">Name:</label>
         <input type="text" id="name" required><br>
         <label for="email">Email:</label>
-        <input type="email" id="email" name="email" pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$" required placeholder="example@domain.com"><br>
+        <input type="email" id="email" required placeholder="example@domain.com"><br>
         <button type="submit">Add Contact</button>
     </form>
 
+    <!-- Search Contact -->
+    <h2>Search Contact by ID</h2>
+    <form id="search-contact-form">
+        <label for="search-id">ID:</label>
+        <input type="number" min="0" id="search-id" required>
+        <button type="submit">Search</button>
+    </form>
+    <div id="search-result"></div>
+
+    <!-- Contacts Table -->
     <h2>Contacts</h2>
     <table>
         <thead>
@@ -63,52 +74,44 @@
         </tbody>
     </table>
 
-        <h2>Update Contact</h2>
+    <!-- Update Contact -->
+    <h2>Update Contact</h2>
     <form id="update-contact-form">
         <label for="update-id">ID:</label>
         <input type="number" min="0" id="update-id" required><br>
         <label for="update-name">Name:</label>
         <input type="text" id="update-name" required><br>
         <label for="update-email">Email:</label>
-        <input type="email" id="update-email" name="email" pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$" required placeholder="example@domain.com"><br>
+        <input type="email" id="update-email" required placeholder="example@domain.com"><br>
         <button type="submit">Update Contact</button>
     </form>
-
 
     <script>
         const apiUrl = 'http://localhost:8080/contacts';
 
-        // Fetch and display contacts
+        // Fetch all contacts
         async function fetchContacts() {
-    const response = await fetch(apiUrl);
-    const contacts = await response.json();
+            const response = await fetch(apiUrl);
+            const contacts = await response.json();
 
-    const table = document.getElementById('contacts-table');
-    table.innerHTML = '';
+            const table = document.getElementById('contacts-table');
+            table.innerHTML = '';
 
-    // Проверка на наличие данных
-    if (!contacts || contacts.length === 0) {
-        console.log("No contacts found");
-        return;
-    }
+            contacts.forEach(contact => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${contact.id}</td>
+                    <td>${contact.name}</td>
+                    <td>${contact.email}</td>
+                    <td>
+                        <button onclick="deleteContact(${contact.id})">Delete</button>
+                    </td>
+                `;
+                table.appendChild(row);
+            });
+        }
 
-    // Заполняем таблицу контактами
-    contacts.forEach(contact => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>${contact.id}</td>
-            <td>${contact.name}</td>
-            <td>${contact.email}</td>
-            <td>
-                <button onclick="deleteContact(${contact.id})">Delete</button>
-            </td>
-        `;
-        table.appendChild(row);
-    });
-}
-
-
-        // Add new contact
+        // Add contact
         document.getElementById('add-contact-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const name = document.getElementById('name').value;
@@ -124,15 +127,44 @@
             fetchContacts();
         });
 
+        // Search contact
+        document.getElementById('search-contact-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('search-id').value;
+
+            try {
+                const response = await fetch(`${apiUrl}/${id}`);
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    document.getElementById('search-result').innerText = `Error: ${errorText}`;
+                    return;
+                }
+
+                const contact = await response.json();
+                document.getElementById('search-result').innerHTML = `
+                    <p>ID: ${contact.id}</p>
+                    <p>Name: ${contact.name}</p>
+                    <p>Email: ${contact.email}</p>
+                `;
+            } catch (err) {
+                document.getElementById('search-result').innerText = `Error: ${err.message}`;
+            }
+        });
+
+        // Delete contact
+        async function deleteContact(id) {
+            await fetch(`${apiUrl}?id=${id}`, { method: 'DELETE' });
+            fetchContacts();
+        }
+
         // Update contact
-            document.getElementById('update-contact-form').addEventListener('submit', async (e) => {
+        document.getElementById('update-contact-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const id = document.getElementById('update-id').value;
             const name = document.getElementById('update-name').value;
             const email = document.getElementById('update-email').value;
 
-            // Убедитесь, что URL правильный
-            await fetch(`http://localhost:8080/contacts/${id}`, {
+            await fetch(`${apiUrl}/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name, email })
@@ -142,13 +174,6 @@
             fetchContacts();
         });
 
-        // Delete contact
-        async function deleteContact(id) {
-            await fetch(`${apiUrl}?id=${id}`, { method: 'DELETE' });
-            fetchContacts();
-        }
-
-        // Initial fetch
         fetchContacts();
     </script>
 </body>
