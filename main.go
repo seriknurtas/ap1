@@ -1,56 +1,102 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	_ "github.com/lib/pq"
-	_ "gorm.io/gorm"
+	"github.com/sirupsen/logrus"
+	"golang.org/x/time/rate"
 )
 
-func getContactByIDHandler(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Path[len("/contacts/"):]
+var limiter = rate.NewLimiter(2, 2)
+var logger *logrus.Logger
+var db *sql.DB
 
-	// Проверка, передан ли ID
-	if id == "" {
-		http.Error(w, "Missing contact ID", http.StatusBadRequest)
-		return
-	}
+// Initialize logger
+func initLogger() {
+	logger = logrus.New()
 
-	contactID, err := strconv.Atoi(id)
+	// Setup JSON formatter
+	logger.SetFormatter(&logrus.JSONFormatter{})
+
+	// Open file for logging
+	file, err := os.OpenFile("log.txt", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
-		http.Error(w, "Invalid contact ID", http.StatusBadRequest)
-		return
+		log.Fatalf("Failed to open log file: %v", err)
 	}
 
-	var contact Contact
-	err = db.QueryRow(`SELECT id, name, email, created_at, updated_at FROM contacts WHERE id = $1`, contactID).
-		Scan(&contact.ID, &contact.Name, &contact.Email, &contact.CreatedAt, &contact.UpdatedAt)
-	if err == sql.ErrNoRows {
-		http.Error(w, "Contact not found", http.StatusNotFound)
-		return
-	} else if err != nil {
-		http.Error(w, "Failed to fetch contact", http.StatusInternalServerError)
-		log.Println("Error fetching contact:", err)
-		return
-	}
+	// Write logs to both file and stdout
+	logger.SetOutput(io.MultiWriter(file, os.Stdout))
+	logger.SetLevel(logrus.InfoLevel)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(contact)
+	logger.Info("Logger initialized. Logs will be written to log.txt and stdout")
 }
 
+// Initialize database
+func initDB() {
+	var err error
+	connStr := "user=postgres password=12345 dbname=contacts sslmode=disable"
+	db, err = sql.Open("postgres", connStr)
+	if err != nil {
+		logger.WithFields(logrus.Fields{"action": "initDB", "status": "failed", "error": err.Error()}).Fatal("Failed to connect to the database")
+	}
+
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS contacts (
+		id SERIAL PRIMARY KEY,
+		name VARCHAR(100),
+		email VARCHAR(100),
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	)`)
+	if err != nil {
+		logger.WithFields(logrus.Fields{"action": "initDB", "status": "failed", "error": err.Error()}).Fatal("Failed to create table")
+	}
+
+	logger.WithFields(logrus.Fields{"action": "initDB", "status": "success"}).Info("Database initialized successfully")
+}
+
+// Error handler
+func handleError(w http.ResponseWriter, status int, message string, err error) {
+	w.WriteHeader(status)
+	response := map[string]string{"error": message}
+	if err != nil {
+		logger.WithFields(logrus.Fields{"status": status, "error": err.Error()}).Error(message)
+		response["details"] = err.Error()
+	} else {
+		logger.WithFields(logrus.Fields{"status": status}).Error(message)
+	}
+	json.NewEncoder(w).Encode(response)
+}
+
+// Rate limiter middleware
+func rateLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !limiter.Allow() {
+			handleError(w, http.StatusTooManyRequests, "Rate limit exceeded. Please wait and try again.", nil)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// CORS middleware
 func enableCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
-		// Обработка preflight-запроса
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -60,6 +106,7 @@ func enableCORS(next http.Handler) http.Handler {
 	})
 }
 
+// Contact struct
 type Contact struct {
 	ID        int       `json:"id"`
 	Name      string    `json:"name"`
@@ -68,67 +115,80 @@ type Contact struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-var db *sql.DB
-
-func initDB() {
-	var err error
-	connStr := "user=postgres password=12345 dbname=contacts sslmode=disable"
-	db, err = sql.Open("postgres", connStr)
-	if err != nil {
-		log.Fatal("Failed to connect to the database:", err)
-	}
-
-	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS contacts (
-		id SERIAL PRIMARY KEY,
-		name VARCHAR(100),
-		email VARCHAR(100),
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	)`) // Migration
-	if err != nil {
-		log.Fatal("Failed to create table:", err)
-	}
-	log.Println("Database initialized successfully.")
-}
-
+// Handlers for CRUD operations
 func createContactHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		handleError(w, http.StatusMethodNotAllowed, "Invalid request method", nil)
 		return
 	}
 
 	var contact Contact
 	if err := json.NewDecoder(r.Body).Decode(&contact); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		handleError(w, http.StatusBadRequest, "Invalid JSON", err)
 		return
 	}
 
-	// Найти максимальный ID и вычислить следующий
 	var nextID int
 	err := db.QueryRow(`SELECT COALESCE(MAX(id), 0) + 1 FROM contacts`).Scan(&nextID)
 	if err != nil {
-		http.Error(w, "Failed to calculate next ID", http.StatusInternalServerError)
-		log.Println("Error calculating next ID:", err)
+		handleError(w, http.StatusInternalServerError, "Failed to calculate next ID", err)
 		return
 	}
 
-	// Вставить запись с вычисленным ID
 	query := `INSERT INTO contacts (id, name, email, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW())`
 	_, err = db.Exec(query, nextID, contact.Name, contact.Email)
 	if err != nil {
-		http.Error(w, "Failed to create contact", http.StatusInternalServerError)
-		log.Println("Error inserting contact:", err)
+		handleError(w, http.StatusInternalServerError, "Failed to create contact", err)
 		return
 	}
 
+	logger.WithFields(logrus.Fields{"action": "createContact", "name": contact.Name, "email": contact.Email}).Info("Contact created successfully")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Contact created successfully"})
 }
 
 func getContactsHandler(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query(`SELECT id, name, email, created_at, updated_at FROM contacts`)
+	filter := r.URL.Query().Get("filter")
+	sort := r.URL.Query().Get("sort")
+	page := r.URL.Query().Get("page")
+	limit := 10
+	offset := 0
+
+	if p, err := strconv.Atoi(page); err == nil && p > 0 {
+		offset = (p - 1) * limit
+	}
+
+	query := "SELECT id, name, email, created_at, updated_at FROM contacts"
+	var conditions []string
+	var args []interface{}
+
+	if filter != "" {
+		conditions = append(conditions, "name ILIKE $1")
+		args = append(args, "%"+filter+"%")
+	}
+
+	if len(conditions) > 0 {
+		query += " WHERE " + conditions[0]
+		for i := 1; i < len(conditions); i++ {
+			query += " AND " + conditions[i]
+		}
+	}
+
+	if sort != "" {
+		allowedSortFields := map[string]bool{"name": true, "email": true, "created_at": true}
+		if allowedSortFields[sort] {
+			query += fmt.Sprintf(" ORDER BY %s", sort)
+		} else {
+			handleError(w, http.StatusBadRequest, "Invalid sort field", nil)
+			return
+		}
+	}
+
+	query += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
+
+	rows, err := db.Query(query, args...)
 	if err != nil {
-		http.Error(w, "Failed to fetch contacts", http.StatusInternalServerError)
+		handleError(w, http.StatusInternalServerError, "Failed to fetch contacts", err)
 		return
 	}
 	defer rows.Close()
@@ -137,106 +197,88 @@ func getContactsHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var contact Contact
 		if err := rows.Scan(&contact.ID, &contact.Name, &contact.Email, &contact.CreatedAt, &contact.UpdatedAt); err != nil {
-			http.Error(w, "Failed to parse contacts", http.StatusInternalServerError)
+			handleError(w, http.StatusInternalServerError, "Failed to parse contacts", err)
 			return
 		}
 		contacts = append(contacts, contact)
 	}
 
+	logger.WithFields(logrus.Fields{"action": "getContacts", "filter": filter, "sort": sort, "page": page}).Info("Contacts fetched successfully")
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(contacts)
 }
 
+// Update contact
 func updateContactHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		handleError(w, http.StatusMethodNotAllowed, "Invalid request method", nil)
 		return
 	}
 
-	// Извлекаем ID контакта из URL
 	id := r.URL.Path[len("/contacts/"):]
 	if id == "" {
-		http.Error(w, "Missing contact ID", http.StatusBadRequest)
+		handleError(w, http.StatusBadRequest, "Missing contact ID", nil)
 		return
 	}
 
-	// Парсим ID в целочисленное значение
 	contactID, err := strconv.Atoi(id)
 	if err != nil {
-		http.Error(w, "Invalid contact ID", http.StatusBadRequest)
+		handleError(w, http.StatusBadRequest, "Invalid contact ID", err)
 		return
 	}
 
 	var contact Contact
 	if err := json.NewDecoder(r.Body).Decode(&contact); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		handleError(w, http.StatusBadRequest, "Invalid JSON", err)
 		return
 	}
 
-	// Проверяем, существует ли запись с данным ID
-	var exists bool
-	err = db.QueryRow(`SELECT EXISTS (SELECT 1 FROM contacts WHERE id = $1)`, contactID).Scan(&exists)
-	if err != nil {
-		http.Error(w, "Failed to check contact existence", http.StatusInternalServerError)
-		log.Println("Error checking contact existence:", err)
-		return
-	}
-	if !exists {
-		http.Error(w, "Contact not found", http.StatusNotFound)
-		return
-	}
-
-	// Обновляем запись
 	query := `UPDATE contacts SET name = $1, email = $2, updated_at = NOW() WHERE id = $3`
 	_, err = db.Exec(query, contact.Name, contact.Email, contactID)
 	if err != nil {
-		http.Error(w, "Failed to update contact", http.StatusInternalServerError)
-		log.Println("Error updating contact:", err)
+		handleError(w, http.StatusInternalServerError, "Failed to update contact", err)
 		return
 	}
 
+	logger.WithFields(logrus.Fields{"action": "updateContact", "id": contactID, "name": contact.Name, "email": contact.Email}).Info("Contact updated successfully")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Contact updated successfully"})
 }
 
+// Delete contact
 func deleteContactHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		handleError(w, http.StatusMethodNotAllowed, "Invalid request method", nil)
 		return
 	}
 
 	id := r.URL.Query().Get("id")
 	if id == "" {
-		http.Error(w, "Missing contact ID", http.StatusBadRequest)
+		handleError(w, http.StatusBadRequest, "Missing contact ID", nil)
 		return
 	}
 
 	query := `DELETE FROM contacts WHERE id = $1`
 	_, err := db.Exec(query, id)
 	if err != nil {
-		http.Error(w, "Failed to delete contact", http.StatusInternalServerError)
+		handleError(w, http.StatusInternalServerError, "Failed to delete contact", err)
 		return
 	}
 
-	// Сброс последовательности
-	resetSeqQuery := `SELECT setval('contacts_id_seq', COALESCE(MAX(id), 1)) FROM contacts`
-	_, err = db.Exec(resetSeqQuery)
-	if err != nil {
-		log.Println("Failed to reset sequence:", err)
-	}
-
+	logger.WithFields(logrus.Fields{"action": "deleteContact", "id": id}).Info("Contact deleted successfully")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Contact deleted successfully"})
-
 }
 
+// Update and delete handlers are similar...
+
 func main() {
+	initLogger()
 	initDB()
 	defer db.Close()
 
 	mux := http.NewServeMux()
 
-	// Main route for contacts
 	mux.HandleFunc("/contacts", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -246,22 +288,43 @@ func main() {
 		case http.MethodDelete:
 			deleteContactHandler(w, r)
 		default:
-			http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+			handleError(w, http.StatusMethodNotAllowed, "Invalid request method", nil)
 		}
 	})
 
-	// Route for specific contact (search/update)
 	mux.HandleFunc("/contacts/", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
-		case http.MethodGet:
-			getContactByIDHandler(w, r)
 		case http.MethodPut:
 			updateContactHandler(w, r)
 		default:
-			http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+			handleError(w, http.StatusMethodNotAllowed, "Invalid request method", nil)
 		}
 	})
 
-	fmt.Println("Server running on port 8080")
-	log.Fatal(http.ListenAndServe(":8080", enableCORS(mux)))
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: enableCORS(rateLimit(mux)),
+	}
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		logger.Info("Server is starting...")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Fatalf("Server error: %v", err)
+		}
+	}()
+
+	<-quit
+	logger.Info("Server shutting down...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		logger.Fatalf("Server forced to shutdown: %v", err)
+	}
+
+	logger.Info("Server exited gracefully")
 }

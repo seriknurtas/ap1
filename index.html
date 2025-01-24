@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contact System</title>
+    <title>Contact Management System</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -31,13 +31,20 @@
             display: inline-block;
             width: 80px;
         }
-        input {
+        input, select, button {
             margin-bottom: 10px;
+        }
+        .error-message {
+            color: red;
+            margin: 10px 0;
         }
     </style>
 </head>
 <body>
-    <h1>Contact System</h1>
+    <h1>Contact Management System</h1>
+
+    <!-- Error Message Display -->
+    <div id="error-message" class="error-message"></div>
 
     <!-- Add Contact -->
     <h2>Add Contact</h2>
@@ -53,10 +60,30 @@
     <h2>Search Contact by ID</h2>
     <form id="search-contact-form">
         <label for="search-id">ID:</label>
-        <input type="number" min="0" id="search-id" required>
+        <input type="number" min="1" id="search-id" required>
         <button type="submit">Search</button>
     </form>
     <div id="search-result"></div>
+
+    <!-- Filter, Sort, and Pagination -->
+    <h2>Filter, Sort, and Pagination</h2>
+    <form id="filter-sort-form">
+        <label for="filter">Filter:</label>
+        <input type="text" id="filter" placeholder="Search by name">
+        <br>
+        <label for="sort">Sort By:</label>
+        <select id="sort">
+            <option value="">Select</option>
+            <option value="name">Name</option>
+            <option value="email">Email</option>
+            <option value="created_at">Created At</option>
+        </select>
+        <br>
+        <label for="page">Page:</label>
+        <input type="number" id="page" value="1" min="1">
+        <br>
+        <button type="submit">Apply</button>
+    </form>
 
     <!-- Contacts Table -->
     <h2>Contacts</h2>
@@ -78,7 +105,7 @@
     <h2>Update Contact</h2>
     <form id="update-contact-form">
         <label for="update-id">ID:</label>
-        <input type="number" min="0" id="update-id" required><br>
+        <input type="number" min="1" id="update-id" required><br>
         <label for="update-name">Name:</label>
         <input type="text" id="update-name" required><br>
         <label for="update-email">Email:</label>
@@ -89,26 +116,54 @@
     <script>
         const apiUrl = 'http://localhost:8080/contacts';
 
-        // Fetch all contacts
+        // Display error message
+        function showError(message) {
+            const errorMessage = document.getElementById('error-message');
+            errorMessage.innerText = message;
+            setTimeout(() => {
+                errorMessage.innerText = '';
+            }, 5000); // Clear after 5 seconds
+        }
+
+        // Fetch contacts with filter, sort, and pagination
         async function fetchContacts() {
-            const response = await fetch(apiUrl);
-            const contacts = await response.json();
+            const filter = document.getElementById('filter').value;
+            const sort = document.getElementById('sort').value;
+            const page = document.getElementById('page').value;
 
-            const table = document.getElementById('contacts-table');
-            table.innerHTML = '';
+            const queryParams = new URLSearchParams();
+            if (filter) queryParams.append('filter', filter);
+            if (sort) queryParams.append('sort', sort);
+            queryParams.append('page', page);
 
-            contacts.forEach(contact => {
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td>${contact.id}</td>
-                    <td>${contact.name}</td>
-                    <td>${contact.email}</td>
-                    <td>
-                        <button onclick="deleteContact(${contact.id})">Delete</button>
-                    </td>
-                `;
-                table.appendChild(row);
-            });
+            try {
+                const response = await fetch(`${apiUrl}?${queryParams.toString()}`);
+                if (!response.ok) {
+                    const error = await response.json();
+                    showError(error.error || 'Failed to fetch contacts');
+                    return;
+                }
+
+                const contacts = await response.json();
+
+                const table = document.getElementById('contacts-table');
+                table.innerHTML = '';
+
+                contacts.forEach(contact => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${contact.id}</td>
+                        <td>${contact.name}</td>
+                        <td>${contact.email}</td>
+                        <td>
+                            <button onclick="deleteContact(${contact.id})">Delete</button>
+                        </td>
+                    `;
+                    table.appendChild(row);
+                });
+            } catch (error) {
+                showError('An error occurred while fetching contacts');
+            }
         }
 
         // Add contact
@@ -117,44 +172,41 @@
             const name = document.getElementById('name').value;
             const email = document.getElementById('email').value;
 
-            await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, email })
-            });
-
-            e.target.reset();
-            fetchContacts();
-        });
-
-        // Search contact
-        document.getElementById('search-contact-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const id = document.getElementById('search-id').value;
-
             try {
-                const response = await fetch(`${apiUrl}/${id}`);
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, email })
+                });
+
                 if (!response.ok) {
-                    const errorText = await response.text();
-                    document.getElementById('search-result').innerText = `Error: ${errorText}`;
+                    const error = await response.json();
+                    showError(error.error || 'Failed to add contact');
                     return;
                 }
 
-                const contact = await response.json();
-                document.getElementById('search-result').innerHTML = `
-                    <p>ID: ${contact.id}</p>
-                    <p>Name: ${contact.name}</p>
-                    <p>Email: ${contact.email}</p>
-                `;
-            } catch (err) {
-                document.getElementById('search-result').innerText = `Error: ${err.message}`;
+                e.target.reset();
+                fetchContacts();
+            } catch (error) {
+                showError('An error occurred while adding contact');
             }
         });
 
         // Delete contact
         async function deleteContact(id) {
-            await fetch(`${apiUrl}?id=${id}`, { method: 'DELETE' });
-            fetchContacts();
+            try {
+                const response = await fetch(`${apiUrl}?id=${id}`, { method: 'DELETE' });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    showError(error.error || 'Failed to delete contact');
+                    return;
+                }
+
+                fetchContacts();
+            } catch (error) {
+                showError('An error occurred while deleting contact');
+            }
         }
 
         // Update contact
@@ -164,16 +216,33 @@
             const name = document.getElementById('update-name').value;
             const email = document.getElementById('update-email').value;
 
-            await fetch(`${apiUrl}/${id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, email })
-            });
+            try {
+                const response = await fetch(`${apiUrl}/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, email })
+                });
 
-            e.target.reset();
+                if (!response.ok) {
+                    const error = await response.json();
+                    showError(error.error || 'Failed to update contact');
+                    return;
+                }
+
+                e.target.reset();
+                fetchContacts();
+            } catch (error) {
+                showError('An error occurred while updating contact');
+            }
+        });
+
+        // Filter, Sort, and Pagination Form Handler
+        document.getElementById('filter-sort-form').addEventListener('submit', (e) => {
+            e.preventDefault();
             fetchContacts();
         });
 
+        // Initial fetch
         fetchContacts();
     </script>
 </body>
