@@ -56,7 +56,7 @@
         <button type="submit">Add Contact</button>
     </form>
 
-    <!-- Search Contact -->
+    <!-- Search Contact by ID -->
     <h2>Search Contact by ID</h2>
     <form id="search-contact-form">
         <label for="search-id">ID:</label>
@@ -113,6 +113,20 @@
         <button type="submit">Update Contact</button>
     </form>
 
+    <h2>Contact Support</h2>
+    <form id="support-form" enctype="multipart/form-data">
+    <label for="support-subject">Subject:</label>
+    <input type="text" id="support-subject" required><br>
+    <label for="support-message">Message:</label>
+    <textarea id="support-message" rows="4" required></textarea><br>
+    <label for="support-file">Attach Image:</label>
+    <input type="file" id="support-file" accept="image/*"><br>
+    <button type="submit">Send</button>
+    </form>
+
+    <div id="email-status"></div>
+
+
     <script>
         const apiUrl = 'http://localhost:8080/contacts';
 
@@ -120,10 +134,46 @@
         function showError(message) {
             const errorMessage = document.getElementById('error-message');
             errorMessage.innerText = message;
+
             setTimeout(() => {
                 errorMessage.innerText = '';
             }, 5000); // Clear after 5 seconds
         }
+
+        document.getElementById('support-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const subject = document.getElementById('support-subject').value;
+    const message = document.getElementById('support-message').value;
+    const fileInput = document.getElementById('support-file');
+    
+    let base64Image = "";
+    if (fileInput.files.length > 0) {
+        const file = fileInput.files[0];
+        const reader = new FileReader();
+        
+        base64Image = await new Promise((resolve) => {
+            reader.onloadend = () => resolve(reader.result.split(',')[1]); // Убираем префикс `data:image/png;base64,`
+            reader.readAsDataURL(file);
+        });
+    }
+
+    const requestBody = { subject, message, image: base64Image };
+
+    try {
+        const response = await fetch('http://localhost:8080/send-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+
+        const result = await response.json();
+        document.getElementById('email-status').innerText = result.message || 'Email sent successfully!';
+    } catch (error) {
+        document.getElementById('email-status').innerText = 'Failed to send email';
+    }
+});
+        
 
         // Fetch contacts with filter, sort, and pagination
         async function fetchContacts() {
@@ -189,6 +239,29 @@
                 fetchContacts();
             } catch (error) {
                 showError('An error occurred while adding contact');
+            }
+        });
+        // Search contact by ID
+        document.getElementById('search-contact-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('search-id').value;
+
+            try {
+                const response = await fetch(`${apiUrl}/${id}`);
+                if (!response.ok) {
+                    const error = await response.json();
+                    showError(error.error || 'Contact not found');
+                    return;
+                }
+
+                const contact = await response.json();
+                document.getElementById('search-result').innerHTML = `
+                    <p><strong>ID:</strong> ${contact.id}</p>
+                    <p><strong>Name:</strong> ${contact.name}</p>
+                    <p><strong>Email:</strong> ${contact.email}</p>
+                `;
+            } catch (error) {
+                showError('An error occurred while searching for the contact');
             }
         });
 

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Админ-панель</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="container mt-4">
+
+    <h2>Админ-панель</h2>
+    <button onclick="logout()" class="btn btn-danger mb-3">Выйти</button>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Email</th>
+                <th>Роль</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody id="usersTable"></tbody>
+    </table>
+
+    <script>
+        async function loadUsers() {
+            const token = localStorage.getItem("token");
+            if (!token) {
+                alert("Вы не авторизованы!");
+                window.location.href = "login.html";
+                return;
+            }
+
+            const response = await fetch("/admin/users", {
+                headers: { "Authorization": token }
+            });
+
+            const users = await response.json();
+            const table = document.getElementById("usersTable");
+            table.innerHTML = "";
+
+            users.forEach(user => {
+                const row = document.createElement("tr");
+                row.innerHTML = `
+                    <td>${user.id}</td>
+                    <td>${user.email}</td>
+                    <td>
+                        <select class="form-select" onchange="changeRole(${user.id}, this.value)">
+                            <option value="user" ${user.role === "user" ? "selected" : ""}>User</option>
+                            <option value="admin" ${user.role === "admin" ? "selected" : ""}>Admin</option>
+                        </select>
+                    </td>
+                    <td>
+                        <button class="btn btn-danger btn-sm" onclick="deleteUser(${user.id})">Удалить</button>
+                    </td>
+                `;
+                table.appendChild(row);
+            });
+        }
+
+        async function changeRole(userId, role) {
+            const token = localStorage.getItem("token");
+
+            await fetch("/admin/update-role", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": token
+                },
+                body: JSON.stringify({ user_id: userId, role })
+            });
+
+            alert("Роль обновлена!");
+            loadUsers();
+        }
+
+        async function deleteUser(userId) {
+            const token = localStorage.getItem("token");
+
+            await fetch(`/admin/delete-user?id=${userId}`, {
+                method: "DELETE",
+                headers: { "Authorization": token }
+            });
+
+            alert("Пользователь удалён!");
+            loadUsers();
+        }
+
+        function logout() {
+            localStorage.removeItem("token");
+            window.location.href = "login.html";
+        }
+
+        window.onload = loadUsers;
+    </script>
+
+</body>
+</html>

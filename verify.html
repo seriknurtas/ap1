@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Подтверждение Email</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="d-flex align-items-center justify-content-center vh-100">
+
+    <div class="container">
+        <div class="card p-4 shadow">
+            <h2 class="text-center">Подтверждение Email</h2>
+            <form id="verifyForm">
+                <div class="mb-3">
+                    <label for="email" class="form-label">Email</label>
+                    <input type="email" id="email" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label for="code" class="form-label">Код подтверждения</label>
+                    <input type="text" id="code" class="form-control" required>
+                </div>
+                <button type="submit" class="btn btn-success w-100">Подтвердить</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Автозаполняем email из localStorage
+        document.addEventListener("DOMContentLoaded", () => {
+            const savedEmail = localStorage.getItem("userEmail");
+            if (savedEmail) {
+                document.getElementById("email").value = savedEmail;
+            }
+        });
+
+        document.getElementById("verifyForm").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const email = document.getElementById("email").value;
+            const code = document.getElementById("code").value;
+
+            try {
+                const response = await fetch("http://localhost:8080/verify-email", { 
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ email, code })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || "Ошибка подтверждения");
+                }
+
+                alert("Email успешно подтвержден!");
+                localStorage.removeItem("userEmail"); // Очищаем email из хранилища
+
+                window.location.href = "login.html"; // Перенаправляем на вход
+
+            } catch (error) {
+                console.error("Ошибка подтверждения:", error);
+                alert("Ошибка при подтверждении. Проверьте код и попробуйте снова.");
+            }
+        });
+    </script>
+
+</body>
+</html>
