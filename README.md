@@ -29,7 +29,7 @@ Follow the steps below to set up and run the Contacts System project:
 1. **Clone the repository:**
    ```bash
    git clone https://github.com/seriknurtas/ap1.git
-   cd contacts-system
+   cd ap1
    ```
 
 2. **Set up the database:**
